@@ -52,6 +52,12 @@ int main()
             event.reply(msg);
 		}
 
+        if (event.command.get_command_name() == "leave")
+        {
+            event.from->disconnect_voice(event.command.guild_id);
+            event.reply("See ya!");
+        }
+
         if (event.command.get_command_name() == "join") {
 
             /* Get the guild */
@@ -71,7 +77,6 @@ int main()
                     join_vc = false;
 
                     /* We are on this voice channel, at this point we can send any audio instantly to vc:
-
                      * current_vc->send_audio_raw(...)
                      */
                 }
@@ -113,18 +118,12 @@ int main()
         }
 	});
 
-    bot.on_message_create([&bot](const dpp::message_create_t& event) {
-        if (event.msg.content.find("anjing") != std::string::npos)
-        {
-            event.reply("no lu anjing", true);
-        }
-            
-    });
 
 	bot.on_ready([&bot](const dpp::ready_t& event) {
 		if (dpp::run_once<struct register_bot_commands>()) {
 			bot.global_command_create(dpp::slashcommand("ping", "Ping the bot!!!", 1164187926888972480));
             bot.global_command_create(dpp::slashcommand("join", "Joins your voice channel.", 1164187926888972480));
+            bot.global_command_create(dpp::slashcommand("leave", "Leaves the vc", 1164187926888972480));
         }
 	});
 
