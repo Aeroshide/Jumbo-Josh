@@ -14,5 +14,11 @@ add_executable (CMakeProject2 "CMakeProject2.cpp" "CMakeProject2.h")
 find_package(dpp CONFIG REQUIRED)
 target_link_libraries(CMakeProject2 PRIVATE dpp::dpp)
 
+find_package(Ogg CONFIG REQUIRED)
+target_link_libraries(CMakeProject2 PRIVATE Ogg::ogg)
+
+find_package(OpusFile CONFIG REQUIRED)
+target_link_libraries(CMakeProject2 PRIVATE OpusFile::opusfile)
+
 
 # TODO: Add tests and install targets if needed.
