@@ -5,8 +5,16 @@
 #include "CMakeProject2.h"
 #include <dpp/dpp.h>
 #include <cstdlib> // for std::getenv
-#include <ogg/ogg.h>
-#include <opus/opusfile.h>
+
+#include <fmt/format.h>
+#include <iomanip>
+#include <sstream>
+
+#include <vector>
+#include <fstream>
+#include <iostream>
+#include <mpg123.h>
+#include <out123.h>
 
 std::string readFileContext(const std::string& fileName)
 {
@@ -33,180 +41,57 @@ std::string readFileContext(const std::string& fileName)
 const std::string token = readFileContext("secret.aeroshide"); //ytta
 const int id = 1164187926888972480;
 
-int main()
-{
+int main() {
+    /* This will hold the decoded MP3.
+    * The D++ library expects PCM format, which are raw sound
+    * data, 2 channel stereo, 16 bit signed 48000Hz.
+    */
+    std::vector<uint8_t> pcmdata;
 
-	dpp::cluster bot(token);
+    mpg123_init();
 
-	bot.on_log(dpp::utility::cout_logger());
+    int err = 0;
+    unsigned char* buffer;
+    size_t buffer_size, done;
+    int channels, encoding;
+    long rate;
 
-	bot.on_slashcommand([](const dpp::slashcommand_t& event) {
-		if (event.command.get_command_name() == "ping")
-		{
-            dpp::embed embed = dpp::embed()
-                .set_color(dpp::colors::sti_blue)
-                .set_title("Some name")
-                .set_url("https://dpp.dev/")
-                .set_author("Some name", "https://dpp.dev/", "https://dpp.dev/DPP-Logo.png")
-                .set_description("Some description here")
-                .set_thumbnail("https://dpp.dev/DPP-Logo.png")
-                .add_field(
-                    "Regular field title",
-                    "Some value here"
-                )
-                .add_field(
-                    "Inline field title",
-                    "Some value here",
-                    true
-                )
-                .add_field(
-                    "Inline field title",
-                    "Some value here",
-                    true
-                )
-                .set_image("https://dpp.dev/DPP-Logo.png")
-                .set_footer(
-                    dpp::embed_footer()
-                    .set_text("Some footer text here")
-                    .set_icon("https://dpp.dev/DPP-Logo.png")
-                )
-                .set_timestamp(time(0));
+    /* Note it is important to force the frequency to 48000 for Discord compatibility */
+    mpg123_handle* mh = mpg123_new(NULL, &err);
+    mpg123_param(mh, MPG123_FORCE_RATE, 48000, 48000.0);
 
-            /* Create a message with the content as our new embed. */
-            dpp::message msg(event.command.channel_id, embed);
+    /* Decode entire file into a vector. You could do this on the fly, but if you do that
+    * you may get timing issues if your CPU is busy at the time and you are streaming to
+    * a lot of channels/guilds.
+    */
+    buffer_size = mpg123_outblock(mh);
+    buffer = new unsigned char[buffer_size];
 
-            /* Reply to the user with the message, containing our embed. */
-            event.reply(msg);
-		}
+    /* Note: In a real world bot, this should have some error logging */
+    mpg123_open(mh, "D:/File Portal/Fl Studio Projects/.Exported Songs/Shop.mp3");
+    mpg123_getformat(mh, &rate, &channels, &encoding);
 
-        if (event.command.get_command_name() == "play")
-        {
-            std::string context = std::get<std::string>(event.get_parameter("song"));
-
-            dpp::voiceconn* voiceContext = event.from->get_voice(event.command.channel.guild_id);
-
-            std::cout << "audio player thread created\n";
-
-            if (!voiceContext || !voiceContext->voiceclient || !voiceContext->voiceclient->is_ready()) {
-                event.reply("There was an issue with getting the voice channel. Make sure I'm in a voice channel!");
-                return;
-            }
-
-            ogg_sync_state oy;
-            ogg_stream_state os;
-            ogg_page og;
-            ogg_packet op;
-            OpusHead header;
-            char* buffer;
-
-            FILE* fd;
-
-            fd = fopen("C:/Users/Aeroshide/AppData/Roaming/Aeroshide/Jumbo-Josh/test.opus", "r");
-
-            fseek(fd, 0L, SEEK_END);
-            size_t sz = ftell(fd);
-            rewind(fd);
-
-            ogg_sync_init(&oy);
-
-            int eos = 0;
-            int i;
-
-            buffer = ogg_sync_buffer(&oy, sz);
-            fread(buffer, 1, sz, fd);
-
-            ogg_sync_wrote(&oy, sz);
-
-            if (ogg_sync_pageout(&oy, &og) != 1) {
-                fprintf(stderr, "Does not appear to be ogg stream.\n");
-                exit(1);
-            }
-
-            ogg_stream_init(&os, ogg_page_serialno(&og));
-
-            if (ogg_stream_pagein(&os, &og) < 0) {
-                fprintf(stderr, "Error reading initial page of ogg stream.\n");
-                exit(1);
-            }
-
-            if (ogg_stream_packetout(&os, &op) != 1) {
-                fprintf(stderr, "Error reading header packet of ogg stream.\n");
-                exit(1);
-            }
-
-            /* We must ensure that the ogg stream actually contains opus data */
-            if (!(op.bytes > 8 && !memcmp("OpusHead", op.packet, 8))) {
-                fprintf(stderr, "Not an ogg opus stream.\n");
-                exit(1);
-            }
-
-            /* Parse the header to get stream info */
-            int err = opus_head_parse(&header, op.packet, op.bytes);
-            if (err) {
-                fprintf(stderr, "Not a ogg opus stream\n");
-                exit(1);
-            }
-
-            /* Now we ensure the encoding is correct for Discord */
-            if (header.channel_count != 2 && header.input_sample_rate != 48000) {
-                fprintf(stderr, "Wrong encoding for Discord, must be 48000Hz sample rate with 2 channels.\n");
-                exit(1);
-            }
-
-            /* Now loop though all the pages and send the packets to the vc */
-            while (ogg_sync_pageout(&oy, &og) == 1) {
-                ogg_stream_init(&os, ogg_page_serialno(&og));
-
-                if (ogg_stream_pagein(&os, &og) < 0) {
-                    fprintf(stderr, "Error reading page of Ogg bitstream data.\n");
-                    exit(1);
-                }
-
-                while (ogg_stream_packetout(&os, &op) != 0) {
-
-                    /* Read remaining headers */
-                    if (op.bytes > 8 && !memcmp("OpusHead", op.packet, 8)) {
-                        int err = opus_head_parse(&header, op.packet, op.bytes);
-                        if (err) {
-                            fprintf(stderr, "Not a ogg opus stream\n");
-                            exit(1);
-                        }
-
-                        if (header.channel_count != 2 && header.input_sample_rate != 48000) {
-                            fprintf(stderr, "Wrong encoding for Discord, must be 48000Hz sample rate with 2 channels.\n");
-                            exit(1);
-                        }
-
-                        continue;
-                    }
-
-                    /* Skip the opus tags */
-                    if (op.bytes > 8 && !memcmp("OpusTags", op.packet, 8))
-                        continue;
-
-                    /* Send the audio */
-                    int samples = opus_packet_get_samples_per_frame(op.packet, 48000);
-
-                    voiceContext->voiceclient->send_audio_opus(op.packet, op.bytes, samples / 48);
-                }
-            }
-
-            /* Cleanup */
-            ogg_stream_clear(&os);
-            ogg_sync_clear(&oy);
-
-            event.reply("Finished playing the audio file!");
-
+    unsigned int counter = 0;
+    for (int totalBytes = 0; mpg123_read(mh, buffer, buffer_size, &done) == MPG123_OK; ) {
+        for (size_t i = 0; i < buffer_size; i++) {
+            pcmdata.push_back(buffer[i]);
         }
+        counter += buffer_size;
+        totalBytes += done;
+    }
+    delete[] buffer;
+    mpg123_close(mh);
+    mpg123_delete(mh);
 
-        if (event.command.get_command_name() == "leave")
-        {
-            event.from->disconnect_voice(event.command.guild_id);
-            event.reply("See ya!");
-        }
+    /* Setup the bot */
+    dpp::cluster bot(readFileContext("secret.aeroshide"));
 
+    bot.on_log(dpp::utility::cout_logger());
+
+    /* The event is fired when someone issues your commands */
+    bot.on_slashcommand([&bot, &pcmdata](const dpp::slashcommand_t& event) {
+        /* Check which command they ran */
         if (event.command.get_command_name() == "join") {
-
             /* Get the guild */
             dpp::guild* g = dpp::find_guild(event.command.guild_id);
 
@@ -215,28 +100,35 @@ int main()
                 event.reply("You don't seem to be in a voice channel!");
                 return;
             }
+
+            /* Tell the user we joined their channel. */
+            event.reply("Joined your channel!");
         }
-	});
+        else if (event.command.get_command_name() == "mp3") {
+            /* Get the voice channel the bot is in, in this current guild. */
+            dpp::voiceconn* v = event.from->get_voice(event.command.guild_id);
 
+            /* If the voice channel was invalid, or there is an issue with it, then tell the user. */
+            if (!v || !v->voiceclient || !v->voiceclient->is_ready()) {
+                event.reply("There was an issue with getting the voice channel. Make sure I'm in a voice channel!");
+                return;
+            }
 
-	bot.on_ready([&bot](const dpp::ready_t& event) {
-		if (dpp::run_once<struct register_bot_commands>()) {
+            /* Stream the already decoded MP3 file. This passes the PCM data to the library to be encoded to OPUS */
+            v->voiceclient->send_audio_raw((uint16_t*)pcmdata.data(), pcmdata.size());
 
-			bot.global_command_create(dpp::slashcommand("ping", "Ping the bot!!!", 1164187926888972480));
-            bot.global_command_create(dpp::slashcommand("join", "Joins your voice channel.", 1164187926888972480));
-            bot.global_command_create(dpp::slashcommand("leave", "Leaves the vc", 1164187926888972480));
-
-            dpp::slashcommand playmusic("play", "Play a selected music", 1164187926888972480);
-            playmusic.add_option(
-                dpp::command_option(dpp::co_string, "song", "Pick the song")
-                .add_choice(dpp::command_option_choice("Everything Goes On", std::string("song_ego")))
-                .add_choice(dpp::command_option_choice("Something Comforting", std::string("song_sc")))
-                .add_choice(dpp::command_option_choice("Shop", std::string("song_sh")))
-            );
-
-            bot.global_command_create(playmusic);
+            event.reply("Played the mp3 file.");
         }
-	});
+        });
+
+    bot.on_ready([&bot](const dpp::ready_t& event) {
+        if (dpp::run_once<struct register_bot_commands>()) {
+            dpp::slashcommand joincommand("join", "Joins your voice channel.", bot.me.id);
+            dpp::slashcommand mp3command("mp3", "Plays an mp3 file.", bot.me.id);
+
+            bot.global_bulk_command_create({ joincommand, mp3command });
+        }
+        });
 
 	bot.start(dpp::st_wait);
 
