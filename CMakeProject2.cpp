@@ -48,40 +48,7 @@ int main() {
     */
     std::vector<uint8_t> pcmdata;
 
-    mpg123_init();
-
-    int err = 0;
-    unsigned char* buffer;
-    size_t buffer_size, done;
-    int channels, encoding;
-    long rate;
-
-    /* Note it is important to force the frequency to 48000 for Discord compatibility */
-    mpg123_handle* mh = mpg123_new(NULL, &err);
-    mpg123_param(mh, MPG123_FORCE_RATE, 48000, 48000.0);
-
-    /* Decode entire file into a vector. You could do this on the fly, but if you do that
-    * you may get timing issues if your CPU is busy at the time and you are streaming to
-    * a lot of channels/guilds.
-    */
-    buffer_size = mpg123_outblock(mh);
-    buffer = new unsigned char[buffer_size];
-
-    /* Note: In a real world bot, this should have some error logging */
-    mpg123_open(mh, "D:/File Portal/Fl Studio Projects/.Exported Songs/Shop.mp3");
-    mpg123_getformat(mh, &rate, &channels, &encoding);
-
-    unsigned int counter = 0;
-    for (int totalBytes = 0; mpg123_read(mh, buffer, buffer_size, &done) == MPG123_OK; ) {
-        for (size_t i = 0; i < buffer_size; i++) {
-            pcmdata.push_back(buffer[i]);
-        }
-        counter += buffer_size;
-        totalBytes += done;
-    }
-    delete[] buffer;
-    mpg123_close(mh);
-    mpg123_delete(mh);
+    
 
     /* Setup the bot */
     dpp::cluster bot(readFileContext("secret.aeroshide"));
@@ -118,6 +85,84 @@ int main() {
             v->voiceclient->send_audio_raw((uint16_t*)pcmdata.data(), pcmdata.size());
 
             event.reply("Played the mp3 file.");
+            //pcmdata.clear();
+        }
+        else if (event.command.get_command_name() == "append") {
+            mpg123_init();
+
+            int err = 0;
+            unsigned char* buffer;
+            size_t buffer_size, done;
+            int channels, encoding;
+            long rate;
+
+            /* Note it is important to force the frequency to 48000 for Discord compatibility */
+            mpg123_handle* mh = mpg123_new(NULL, &err);
+            mpg123_param(mh, MPG123_FORCE_RATE, 48000, 48000.0);
+
+            /* Decode entire file into a vector. You could do this on the fly, but if you do that
+            * you may get timing issues if your CPU is busy at the time and you are streaming to
+            * a lot of channels/guilds.
+            */
+            buffer_size = mpg123_outblock(mh);
+            buffer = new unsigned char[buffer_size];
+
+            /* Note: In a real world bot, this should have some error logging */
+            const char* appData = std::getenv("APPDATA");
+            std::string path = std::string(appData) + "\\Aeroshide\\Jumbo-Josh";
+            std::string fileName = "\\test.mp3"; // replace with your file name
+            std::string fullPath = path + fileName;
+
+            std::cout << "Appending file " << fullPath << "\n";
+
+            mpg123_open(mh, fullPath.c_str());
+            mpg123_getformat(mh, &rate, &channels, &encoding);
+
+            unsigned int counter = 0;
+            for (int totalBytes = 0; mpg123_read(mh, buffer, buffer_size, &done) == MPG123_OK; ) {
+                for (size_t i = 0; i < buffer_size; i++) {
+                    pcmdata.push_back(buffer[i]);
+                }
+                counter += buffer_size;
+                totalBytes += done;
+            }
+            delete[] buffer;
+            //pcmdata.clear(); // The pcmdata.clear(); should be placed right before you start loading the new song data into pcmdata an implementation of currently_playing would help!
+            mpg123_close(mh);
+            mpg123_delete(mh);
+        }
+        else if (event.command.get_command_name() == "download")
+        {
+            printf("Early Logging of Download thread\n");
+            const char* appData = std::getenv("APPDATA");
+            std::string path = std::string(appData) + "/Aeroshide/Jumbo-Josh/";
+            std::string fileName = "test"; // Remove the ".mp3" extension
+            std::string fullPath = path + fileName;
+
+            std::cout << "Download path initialized: " << fullPath;
+
+            std::string context = std::get<std::string>(event.get_parameter("url")); // Replace with the YouTube URL you want to download
+
+            std::cout << "Youtube URL: " << context;
+            // construct the command
+            std::string command = ".\\youtube-dl.exe -o \"" + fullPath + ".opus\" --verbose --extract-audio --audio-format opus --postprocessor-args \" -ac 2 -ar 48000\" \"" + context + "\"";
+
+
+            std::cout << "Executing Download Thread with command: " << command;
+
+            // execute the command
+            system(command.c_str());
+
+            // Construct the command to convert the downloaded WAV to MP3
+            std::string conversionCommand = "ffmpeg -i " + fullPath + ".opus -codec:a libmp3lame -q:a 4 " + fullPath + ".mp3";
+
+            std::cout << "Executing Conversion with command: " << conversionCommand;
+
+            // Execute the command to convert to MP3
+            system(conversionCommand.c_str());
+
+            printf("Download and Conversion Completed!\n");
+
         }
         });
 
@@ -125,8 +170,20 @@ int main() {
         if (dpp::run_once<struct register_bot_commands>()) {
             dpp::slashcommand joincommand("join", "Joins your voice channel.", bot.me.id);
             dpp::slashcommand mp3command("mp3", "Plays an mp3 file.", bot.me.id);
+            dpp::slashcommand appendCommand("append", "append RIGHT NOW", bot.me.id);
 
-            bot.global_bulk_command_create({ joincommand, mp3command });
+            dpp::slashcommand myCommand("download", "My command description", bot.me.id);
+            myCommand.add_option(
+                dpp::command_option(
+                    dpp::co_string, // This sets the option type to string
+                    "url", // This is the name of the option
+                    "My option description", // This is the description of the option
+                    true
+                )
+            );
+
+
+            bot.global_bulk_command_create({ joincommand, mp3command, myCommand, appendCommand});
         }
         });
 
